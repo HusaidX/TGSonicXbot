@@ -19,7 +19,10 @@ class YouTube:
         self.base = "https://www.youtube.com/watch?v="
         self.listbase = "https://youtube.com/playlist?list="
         self.regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/|youtube\.com\/playlist\?list=)"
-        self.audio_opts = {"format": "bestaudio[ext=m4a]"}
+        self.audio_opts = {
+            "format": "bestaudio[ext=m4a]",
+            "cookiefile": "cookies.txt",
+        }
         self.video_opts = {
             "format": "best",
             "addmetadata": True,
@@ -27,6 +30,7 @@ class YouTube:
             "prefer_ffmpeg": True,
             "geo_bypass": True,
             "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
             "postprocessors": [
                 {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}
             ],
@@ -39,6 +43,7 @@ class YouTube:
             "outtmpl": "downloads/%(id)s.%(ext)s",
             "geo_bypass": True,
             "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
             "quiet": True,
             "no_warnings": True,
         }
@@ -47,11 +52,13 @@ class YouTube:
             "outtmpl": "downloads/%(id)s.%(ext)s",
             "geo_bypass": True,
             "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
             "quiet": True,
             "no_warnings": True,
         }
         self.yt_playlist_opts = {
             "exctract_flat": True,
+            "cookiefile": "cookies.txt",
         }
         self.lyrics = Config.LYRICS_API
         try:
