@@ -20,7 +20,7 @@ class YouTube:
         self.listbase = "https://youtube.com/playlist?list="
         self.regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/|youtube\.com\/playlist\?list=)"
         self.audio_opts = {
-            "format": "bestaudio[ext=m4a]",
+            "format": "bestaudio/best",
             "cookiefile": "cookies.txt",
         }
         self.video_opts = {
@@ -48,7 +48,7 @@ class YouTube:
             "no_warnings": True,
         }
         self.yt_opts_video = {
-            "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
+            "format": "best[height<=?720]/bestvideo[height<=?720]+bestaudio/best",
             "outtmpl": "downloads/%(id)s.%(ext)s",
             "geo_bypass": True,
             "nocheckcertificate": True,
@@ -57,7 +57,7 @@ class YouTube:
             "no_warnings": True,
         }
         self.yt_playlist_opts = {
-            "exctract_flat": True,
+            "extract_flat": True,
             "cookiefile": "cookies.txt",
         }
         self.lyrics = Config.LYRICS_API
@@ -118,15 +118,10 @@ class YouTube:
 
     async def download(self, link: str, video_id: bool, video: bool = False) -> str:
         yt_url = await self.format_link(link, video_id)
-        if video:
-            dlp = yt_dlp.YoutubeDL(self.yt_opts_video)
-            info = dlp.extract_info(yt_url, False)
-        else:
-            dlp = yt_dlp.YoutubeDL(self.yt_opts_audio)
-            info = dlp.extract_info(yt_url, False)
-        path = os.path.join("downloads", f"{info['id']}.{info['ext']}")
-        if not os.path.exists(path):
-            dlp.download([yt_url])
+        opts = self.yt_opts_video if video else self.yt_opts_audio
+        with yt_dlp.YoutubeDL(opts) as dlp:
+            info = dlp.extract_info(yt_url, download=True)
+            path = dlp.prepare_filename(info)
         return path
 
     async def send_song(
