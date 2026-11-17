@@ -1,316 +1,218 @@
 import os
+import re
+import time
 
-from pyrogram.enums import MessageEntityType
-from pyrogram.types import InlineKeyboardMarkup, Message
+import requests
+import yt_dlp
+from lyricsgenius import Genius
+from pyrogram.types import CallbackQuery
+from youtubesearchpython.__future__ import VideosSearch
 
 from config import Config
-from Music.core.calls import hellmusic
 from Music.core.clients import hellbot
-from Music.core.database import db
 from Music.core.logger import LOGS
-from Music.helpers.buttons import Buttons
 from Music.helpers.strings import TEXTS
 
-from .queue import Queue
-from .thumbnail import thumb
-from .youtube import ytube
 
-
-class Player:
-    def __init__(self) -> None:
-        pass
-
-    async def get_url(self, message: Message):
-        msg = [message]
-        if message.reply_to_message:
-            msg.append(message.reply_to_message)
-        url = ""
-        offset = length = None
-        for m in msg:
-            if offset:
-                break
-            if m.entities:
-                for entity in m.entities:
-                    if entity.type == MessageEntityType.URL:
-                        url = m.text or m.caption
-                        offset, length = entity.offset, entity.length
-                        break
-                    if entity.type == MessageEntityType.TEXT_LINK:
-                        return entity.url
-            elif m.caption_entities:
-                for entity in m.caption_entities:
-                    if entity.type == MessageEntityType.URL:
-                        url = m.text or m.caption
-                        offset, length = entity.offset, entity.length
-                        break
-                    if entity.type == MessageEntityType.TEXT_LINK:
-                        return entity.url
-        if offset in (None,):
-            return None
-        return url[offset : offset + length]
-
-    async def play(self, message: Message, context: dict, edit: bool = True):
-        (
-            chat_id,
-            user_id,
-            duration,
-            file,
-            title,
-            user,
-            video_id,
-            vc_type,
-            force,
-        ) = context.values()
-        if force:
-            await hellmusic.leave_vc(chat_id, True)
-        if video_id == "telegram":
-            file_path = file
-        else:
-            try:
-                if edit:
-                    await message.edit_text("Downloading ...")
-                else:
-                    await message.reply_text("Downloading ...")
-                file_path = await ytube.download(
-                    video_id, True, True if vc_type == "video" else False
-                )
-            except Exception as e:
-                if edit:
-                    await message.edit_text(str(e))
-                else:
-                    await message.reply_text(str(e))
-                return
-        position = Queue.put_queue(
-            chat_id,
-            user_id,
-            duration,
-            file_path,
-            title,
-            user,
-            video_id,
-            vc_type,
-            force,
-        )
-        if position == 0:
-            photo = thumb.generate((359), (297, 302), video_id)
-            try:
-                await hellmusic.join_vc(
-                    chat_id, file_path, True if vc_type == "video" else False
-                )
-            except Exception as e:
-                await message.delete()
-                await message.reply_text(str(e))
-                Queue.clear_queue(chat_id)
-                os.remove(file_path)
-                os.remove(photo)
-                return
-            btns = Buttons.player_markup(chat_id, video_id, hellbot.app.username)
-            if photo:
-                sent = await hellbot.app.send_photo(
-                    chat_id,
-                    photo,
-                    TEXTS.PLAYING.format(
-                        hellbot.app.mention,
-                        title,
-                        duration,
-                        user,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(btns),
-                )
-                os.remove(photo)
-            else:
-                sent = await hellbot.app.send_message(
-                    chat_id,
-                    TEXTS.PLAYING.format(
-                        hellbot.app.mention,
-                        title,
-                        duration,
-                        user,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(btns),
-                )
-            previous = Config.PLAYER_CACHE.get(chat_id)
-            if previous:
-                try:
-                    await previous.delete()
-                except Exception:
-                    pass
-            Config.PLAYER_CACHE[chat_id] = sent
-        else:
-            sent = await hellbot.app.send_message(
-                chat_id,
-                TEXTS.QUEUE.format(
-                    position,
-                    title,
-                    duration,
-                    user,
-                ),
-                reply_markup=InlineKeyboardMarkup(Buttons.close_markup()),
-            )
-            prev_q = Config.QUEUE_CACHE.get(chat_id)
-            if prev_q:
-                try:
-                    await prev_q.delete()
-                except Exception:
-                    pass
-            Config.QUEUE_CACHE[chat_id] = sent
-            return await message.delete()
-        await message.delete()
-        await db.update_songs_count(1)
-        await db.update_user(user_id, "songs_played", 1)
-        chat_name = (await hellbot.app.get_chat(chat_id)).title
-        await hellbot.logit(
-            f"play {vc_type}",
-            f"**⤷ Song:** `{title}` \n**⤷ Chat:** {chat_name} [`{chat_id}`] \n**⤷ User:** {user}",
-        )
-
-    async def skip(self, chat_id: int, message: Message):
-        await message.edit_text("Skipping ...")
-        await hellmusic.change_vc(chat_id)
-        await message.delete()
-
-    async def replay(self, chat_id: int, message: Message):
-        que = Queue.get_current(chat_id)
-        if not que:
-            return await message.edit_text("Nothing is playing to replay")
-        video = True if que["vc_type"] == "video" else False
-        photo = thumb.generate((359), (297, 302), que["video_id"])
-        if que["file"] == que["video_id"]:
-            file_path = await ytube.download(que["video_id"], True, video)
-        else:
-            file_path = que["file"]
+class YouTube:
+    def __init__(self):
+        self.base = "https://www.youtube.com/watch?v="
+        self.listbase = "https://youtube.com/playlist?list="
+        self.regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/|youtube\.com\/playlist\?list=)"
+        self.yt_args = {
+            "youtube": {
+                "player_client": ["tv", "web_safari", "mweb"],
+            }
+        }
+        self.audio_opts = {
+            "format": "bestaudio/best",
+            "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
+        }
+        self.video_opts = {
+            "format": "best",
+            "addmetadata": True,
+            "key": "FFmpegMetadata",
+            "prefer_ffmpeg": True,
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
+            "postprocessors": [
+                {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}
+            ],
+            "outtmpl": "%(id)s.mp4",
+            "logtostderr": False,
+            "quiet": True,
+        }
+        self.yt_opts_audio = {
+            "format": "bestaudio/best",
+            "outtmpl": "downloads/%(id)s.%(ext)s",
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
+            "quiet": True,
+            "no_warnings": True,
+        }
+        self.yt_opts_video = {
+            "format": "best[height<=?720]/best",
+            "outtmpl": "downloads/%(id)s.%(ext)s",
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
+            "quiet": True,
+            "no_warnings": True,
+        }
+        self.yt_playlist_opts = {
+            "extract_flat": True,
+            "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
+        }
+        self.lyrics = Config.LYRICS_API
         try:
-            await hellmusic.replay_vc(chat_id, file_path, video)
+            if self.lyrics:
+                self.client = Genius(self.lyrics, remove_section_headers=True)
+            else:
+                self.client = None
         except Exception as e:
-            await message.delete()
-            await message.reply_text(str(e))
-            Queue.clear_queue(chat_id)
-            os.remove(que["file"])
-            os.remove(photo)
-            return
-        btns = Buttons.player_markup(chat_id, que["video_id"], hellbot.app.username)
-        if photo:
-            sent = await hellbot.app.send_photo(
-                chat_id,
-                photo,
-                TEXTS.PLAYING.format(
-                    hellbot.app.mention,
-                    que["title"],
-                    que["duration"],
-                    que["user"],
-                ),
-                reply_markup=InlineKeyboardMarkup(btns),
-            )
-            os.remove(photo)
-        else:
-            sent = await hellbot.app.send_message(
-                chat_id,
-                TEXTS.PLAYING.format(
-                    hellbot.app.mention,
-                    que["title"],
-                    que["duration"],
-                    que["user"],
-                ),
-                reply_markup=InlineKeyboardMarkup(btns),
-            )
-        previous = Config.PLAYER_CACHE.get(chat_id)
-        if previous:
-            try:
-                await previous.delete()
-            except Exception:
-                pass
-        Config.PLAYER_CACHE[chat_id] = sent
-        await message.delete()
+            LOGS.warning(f"[Exception in Lyrics API]: {e}")
+            self.client = None
 
-    async def playlist(
-        self, message: Message, user_dict: dict, collection: list, video: bool = False
-    ):
-        vc_type = "video" if video else "voice"
-        count = failed = 0
-        user_id, user_mention = user_dict.values()
-        if await db.is_active_vc(message.chat.id):
-            await message.edit_text(
-                "This chat have an active vc. Adding songs from playlist in the queue... \n\n__This might take some time!__"
-            )
-        previously = len(Queue.get_queue(message.chat.id))
-        for i in collection:
-            try:
-                data = (await ytube.get_data(i, True, 1))[0]
-                if count == 0 and previously == 0:
-                    file_path = await ytube.download(data["id"], True, video)
-                    _queue = Queue.put_queue(
-                        message.chat.id,
-                        user_id,
-                        data["duration"],
-                        file_path,
-                        data["title"],
-                        user_mention,
-                        data["id"],
-                        vc_type,
-                        False,
+    def check(self, link: str):
+        return bool(re.match(self.regex, link))
+
+    async def format_link(self, link: str, video_id: bool) -> str:
+        link = link.strip()
+        if video_id:
+            link = self.base + link
+        if "&" in link:
+            link = link.split("&")[0]
+        return link
+
+    async def get_data(self, link: str, video_id: bool, limit: int = 1) -> list:
+        yt_url = await self.format_link(link, video_id)
+        collection = []
+        results = VideosSearch(yt_url, limit=limit)
+        for result in (await results.next())["result"]:
+            vid = result["id"]
+            channel = result["channel"]["name"]
+            channel_url = result["channel"]["link"]
+            duration = result["duration"]
+            published = result["publishedTime"]
+            thumbnail = f"https://i.ytimg.com/vi/{result['id']}/hqdefault.jpg"
+            title = result["title"]
+            url = result["link"]
+            views = result["viewCount"]["short"]
+            context = {
+                "id": vid,
+                "ch_link": channel_url,
+                "channel": channel,
+                "duration": duration,
+                "link": url,
+                "published": published,
+                "thumbnail": thumbnail,
+                "title": title,
+                "views": views,
+            }
+            collection.append(context)
+        return collection[:limit]
+
+    async def get_playlist(self, link: str) -> list:
+        yt_url = await self.format_link(link, False)
+        with yt_dlp.YoutubeDL(self.yt_playlist_opts) as ydl:
+            results = ydl.extract_info(yt_url, False)
+            playlist = [video['id'] for video in results['entries']]
+        return playlist
+
+    async def download(self, link: str, video_id: bool, video: bool = False) -> str:
+        yt_url = await self.format_link(link, video_id)
+        opts = self.yt_opts_video if video else self.yt_opts_audio
+        with yt_dlp.YoutubeDL(opts) as dlp:
+            info = dlp.extract_info(yt_url, download=True)
+            path = dlp.prepare_filename(info)
+        return path
+
+    async def send_song(
+        self, message: CallbackQuery, rand_key: str, key: int, video: bool = False
+    ) -> dict:
+        track = Config.SONG_CACHE[rand_key][key]
+        ydl_opts = self.video_opts if video else self.audio_opts
+        hell = await message.message.reply_text("Downloading...")
+        await message.message.delete()
+        try:
+            output = None
+            thumb = f"{track['id']}{time.time()}.jpg"
+            _thumb = requests.get(track["thumbnail"], allow_redirects=True)
+            open(thumb, "wb").write(_thumb.content)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                yt_file = ydl.extract_info(track["link"], download=video)
+                if not video:
+                    output = ydl.prepare_filename(yt_file)
+                    ydl.process_info(yt_file)
+                    await message.message.reply_audio(
+                        audio=output,
+                        caption=TEXTS.SONG_CAPTION.format(
+                            track["title"],
+                            track["link"],
+                            track["views"],
+                            track["duration"],
+                            message.from_user.mention,
+                            hellbot.app.mention,
+                        ),
+                        duration=int(yt_file["duration"]),
+                        performer=TEXTS.PERFORMER,
+                        title=yt_file["title"],
+                        thumb=thumb,
                     )
-                    try:
-                        photo = thumb.generate((359), (297, 302), data["id"])
-                        await hellmusic.join_vc(message.chat.id, file_path, video)
-                    except Exception as e:
-                        await message.edit_text(str(e))
-                        Queue.clear_queue(message.chat.id)
-                        os.remove(file_path)
-                        os.remove(photo)
-                        return
-                    btns = Buttons.player_markup(
-                        message.chat.id, data["id"], hellbot.app.username
-                    )
-                    if photo:
-                        sent = await hellbot.app.send_photo(
-                            message.chat.id,
-                            photo,
-                            TEXTS.PLAYING.format(
-                                hellbot.app.mention,
-                                data["title"],
-                                data["duration"],
-                                user_mention,
-                            ),
-                            reply_markup=InlineKeyboardMarkup(btns),
-                        )
-                        os.remove(photo)
-                    else:
-                        sent = await hellbot.app.send_message(
-                            message.chat.id,
-                            TEXTS.PLAYING.format(
-                                hellbot.app.mention,
-                                data["title"],
-                                data["duration"],
-                                user_mention,
-                            ),
-                            reply_markup=InlineKeyboardMarkup(btns),
-                        )
-                    old = Config.PLAYER_CACHE.get(message.chat.id)
-                    if old:
-                        try:
-                            await old.delete()
-                        except Exception:
-                            pass
-                    Config.PLAYER_CACHE[message.chat.id] = sent
                 else:
-                    _queue = Queue.put_queue(
-                        message.chat.id,
-                        user_id,
-                        data["duration"],
-                        data["id"],
-                        data["title"],
-                        user_mention,
-                        data["id"],
-                        vc_type,
-                        False,
+                    output = f"{yt_file['id']}.mp4"
+                    await message.message.reply_video(
+                        video=output,
+                        caption=TEXTS.SONG_CAPTION.format(
+                            track["title"],
+                            track["link"],
+                            track["views"],
+                            track["duration"],
+                            message.from_user.mention,
+                            hellbot.app.mention,
+                        ),
+                        duration=int(yt_file["duration"]),
+                        thumb=thumb,
+                        supports_streaming=True,
                     )
-                count += 1
-            except Exception as e:
-                LOGS.error(str(e))
-                failed += 1
-        await message.edit_text(
-            f"**Added all tracks to queue!** \n\n**Total tracks: `{count}`** \n**Failed: `{failed}`**"
-        )
+            chat = message.message.chat.title or message.message.chat.first_name
+            await hellbot.logit(
+                "Video" if video else "Audio",
+                f"**⤷ User:** {message.from_user.mention} [`{message.from_user.id}`]\n**⤷ Chat:** {chat} [`{message.message.chat.id}`]\n**⤷ Link:** [{track['title']}]({track['link']})",
+            )
+            await hell.delete()
+        except Exception as e:
+            await hell.edit_text(f"**Error:**\n`{e}`")
+        try:
+            Config.SONG_CACHE.pop(rand_key)
+            os.remove(thumb)
+            os.remove(output)
+        except Exception:
+            pass
+
+    async def get_lyrics(self, song: str, artist: str) -> dict:
+        context = {}
+        if not self.client:
+            return context
+        results = self.client.search_song(song, artist)
+        if results:
+            results.to_dict()
+            title = results["full_title"]
+            image = results["song_art_image_url"]
+            lyrics = results["lyrics"]
+            context = {
+                "title": title,
+                "image": image,
+                "lyrics": lyrics,
+            }
+        return context
 
 
-player = Player()
+ytube = YouTube()
