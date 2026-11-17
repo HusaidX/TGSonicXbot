@@ -19,9 +19,15 @@ class YouTube:
         self.base = "https://www.youtube.com/watch?v="
         self.listbase = "https://youtube.com/playlist?list="
         self.regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/|youtube\.com\/playlist\?list=)"
+        self.yt_args = {
+            "youtube": {
+                "player_client": ["android", "web", "tv_embedded"],
+            }
+        }
         self.audio_opts = {
             "format": "bestaudio/best",
             "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
         }
         self.video_opts = {
             "format": "best",
@@ -31,6 +37,7 @@ class YouTube:
             "geo_bypass": True,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
             "postprocessors": [
                 {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}
             ],
@@ -44,21 +51,24 @@ class YouTube:
             "geo_bypass": True,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
             "quiet": True,
             "no_warnings": True,
         }
         self.yt_opts_video = {
-            "format": "best[height<=?720]/bestvideo[height<=?720]+bestaudio/best",
+            "format": "best[height<=?720]/best",
             "outtmpl": "downloads/%(id)s.%(ext)s",
             "geo_bypass": True,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
             "quiet": True,
             "no_warnings": True,
         }
         self.yt_playlist_opts = {
             "extract_flat": True,
             "cookiefile": "cookies.txt",
+            "extractor_args": self.yt_args,
         }
         self.lyrics = Config.LYRICS_API
         try:
