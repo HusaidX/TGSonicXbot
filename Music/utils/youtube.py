@@ -19,11 +19,11 @@ class YouTube:
         self.base = "https://www.youtube.com/watch?v="
         self.listbase = "https://youtube.com/playlist?list="
         self.regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/|youtube\.com\/playlist\?list=)"
-             self.yt_args = {
-         "youtube": {
-             "player_client": ["tv", "android_vr", "web_creator"],
-         }
-     }
+        self.yt_args = {
+            "youtube": {
+                "player_client": ["tv", "android_vr", "web_creator"],
+            }
+        }
         self.audio_opts = {
             "format": "bestaudio/best/worst",
             "cookiefile": "cookies.txt",
