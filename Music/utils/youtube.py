@@ -21,11 +21,11 @@ class YouTube:
         self.regex = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/|youtube\.com\/playlist\?list=)"
         self.yt_args = {
             "youtube": {
-                "player_client": ["android", "web", "tv_embedded"],
+                "player_client": ["tv", "web_safari", "default"],
             }
         }
         self.audio_opts = {
-            "format": "bestaudio/best",
+            "format": "bestaudio/best/worst",
             "cookiefile": "cookies.txt",
             "extractor_args": self.yt_args,
         }
@@ -46,7 +46,7 @@ class YouTube:
             "quiet": True,
         }
         self.yt_opts_audio = {
-            "format": "bestaudio/best",
+            "format": "bestaudio/best/worst",
             "outtmpl": "downloads/%(id)s.%(ext)s",
             "geo_bypass": True,
             "nocheckcertificate": True,
@@ -56,7 +56,7 @@ class YouTube:
             "no_warnings": True,
         }
         self.yt_opts_video = {
-            "format": "best[height<=?720]/best",
+            "format": "best[height<=?720]/best/worst",
             "outtmpl": "downloads/%(id)s.%(ext)s",
             "geo_bypass": True,
             "nocheckcertificate": True,
