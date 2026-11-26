@@ -1,5 +1,12 @@
+#
+# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
+#
+# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
+# and is released under the "MIT License".
+# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
+#
 # All rights reserved.
-
+#
 
 from random import randint
 from time import time
@@ -371,32 +378,6 @@ class MongoDB:
         if not self.users:
             self.users.extend([user["_id"] async for user in self.usersdb.find()])
         return self.users
-
-    async def record_user_start(
-        self,
-        user_id: int,
-        name: str,
-        username: str | None = None,
-        bio: str | None = None,
-    ) -> int:
-        if user_id not in self.users:
-            self.users.append(user_id)
-
-        doc = await self.usersdb.find_one_and_update(
-            {"_id": user_id},
-            {
-                "$inc": {"start_count": 1},
-                "$set": {
-                    "name": name,
-                    "username": username,
-                    "bio": bio,
-                },
-                "$setOnInsert": {"_id": user_id},
-            },
-            upsert=True,
-            return_document=True,
-        )
-        return int(doc.get("start_count", 1)) if doc else 1
 
     async def migrate_coll(self) -> None:
         logger.info("Migrating users and chats from old collections...")
