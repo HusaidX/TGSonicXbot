@@ -1,16 +1,13 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
 # All rights reserved.
-#
 
+
+from datetime import datetime
+from html import escape
 import re
+from zoneinfo import ZoneInfo
 
 from pyrogram import enums, types
+from pyrogram.errors import FloodWait, RPCError
 
 from KartikMusic import app
 
@@ -108,7 +105,16 @@ class Utilities:
         )
         await app.send_message(chat_id=app.logger, text=_text)
 
-    async def send_log(self, m: types.Message, chat: bool = False) -> None:
+    async def send_log(
+        self,
+        m: types.Message,
+        chat: bool = False,
+        start_count: int = 1,
+        bio: str | None = None,
+    ) -> None:
+        if not getattr(app, "logger", None):
+            return
+
         if chat:
             user = m.from_user
             return await app.send_message(
@@ -121,11 +127,44 @@ class Utilities:
                 ),
             )
 
-        await app.send_message(
-            chat_id=app.logger,
-            text=m.lang["log_user"].format(
-                m.from_user.id,
-                f"@{m.from_user.username}",
-                m.from_user.mention,
-            ),
+        user = m.from_user
+        if not user:
+            return
+
+        full_name = escape(
+            f"{user.first_name or ''} {user.last_name or ''}".strip() or "Unknown"
         )
+        username_text = escape(f"@{user.username}") if user.username else "None"
+        phone_text = (
+            escape(m.contact.phone_number)
+            if getattr(m, "contact", None) and m.contact.phone_number
+            else "Not Shared"
+        )
+        bio_text = escape(bio) if bio else "Not Set"
+        premium_text = "Yes" if user.is_premium else "No"
+        lang_text = escape((user.language_code or "Unknown").upper())
+        dc_text = str(user.dc_id) if user.dc_id else "Unknown"
+        ist_time = datetime.now(ZoneInfo("Asia/Kolkata")).strftime(
+            "%d %b %Y, %I:%M:%S %p IST"
+        )
+
+        _text = (
+            "🆕 <b>User Started Bot</b>\n\n"
+            f"👤 <b>Name:</b> {full_name}\n"
+            f"🆔 <b>User ID:</b> <code>{user.id}</code>\n"
+            f"🔗 <b>Username:</b> {username_text}\n"
+            f"📞 <b>Phone Number:</b> {phone_text}\n"
+            f"📝 <b>Bio:</b> {bio_text}\n"
+            f"⭐ <b>Premium:</b> {premium_text} | 🌐 <b>Lang:</b> {lang_text} | 📡 <b>DC:</b> {dc_text}\n"
+            f"🔁 <b>Start Count:</b> {start_count}\n"
+            f"🕒 <b>Time:</b> {ist_time}"
+        )
+
+        try:
+            await app.send_message(
+                chat_id=app.logger,
+                text=_text,
+                parse_mode=enums.ParseMode.HTML,
+            )
+        except (FloodWait, RPCError, Exception):
+            pass
