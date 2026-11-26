@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>🎵 KartikMusic 🎵</h1>
+<h1>🎵 TGSonicXbot 🎵</h1>
 
 <b>A Powerful Telegram Music Bot for Group Voice Chats</b><br>
 Stream high-quality audio and video with ease.
