@@ -1,12 +1,5 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
 # All rights reserved.
-#
+
 
 import asyncio
 
@@ -50,10 +43,25 @@ async def start(_, message: types.Message):
     )
 
     if private:
-        if await db.is_user(message.from_user.id):
+        user = message.from_user
+        if not user:
             return
-        await utils.send_log(message)
-        await db.add_user(message.from_user.id)
+
+        bio = None
+        try:
+            chat_info = await app.get_chat(user.id)
+            bio = getattr(chat_info, "bio", None)
+        except Exception:
+            bio = None
+
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Unknown"
+        start_count = await db.record_user_start(
+            user_id=user.id,
+            name=full_name,
+            username=user.username,
+            bio=bio,
+        )
+        await utils.send_log(message, start_count=start_count, bio=bio)
     else:
         if await db.is_chat(message.chat.id):
             return
