@@ -1,17 +1,11 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
-# All rights reserved.
-#
+# All rights reserved
+
 
 import asyncio
 import os
 import random
 import re
+import time
 import urllib.parse
 from typing import Any
 
@@ -100,6 +94,7 @@ def _safe_search_ytdlp(query: str) -> dict[str, Any]:
         "extract_flat": True,
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 6,
         "extractor_args": {"youtube": {"player_client": ["mweb", "ios", "android"]}},
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -143,7 +138,6 @@ async def download_assistant(query: str, dl_type: str) -> str:
     safe_query = urllib.parse.quote(query)
     ext = "mp3" if dl_type == "audio" else "mp4"
     if API_KEY:
-        # Use query_masked path to satisfy bots that look for direct file extensions
         url = f"{API_URL}/downloads/{API_KEY}/{safe_query}.{ext}"
     else:
         url = f"{API_URL}/downloads/stream?query={safe_query}&dl_type={dl_type}"
@@ -152,22 +146,10 @@ async def download_assistant(query: str, dl_type: str) -> str:
 
 class YouTube:
     """
-    Universal media player and extractor supporting 80+ platforms:
-    YouTube, Spotify, Apple Music, JioSaavn, Wynk, Hungama, Amazon Music,
-    Soundcloud, Deezer, Gaana, Resso, Tidal, Audiomack, Bandcamp, Boomplay,
-    Mixcloud, Anghami, Qobuz, Pandora, iHeart, TuneIn, Napster, Last.fm,
-    Shazam, Genius, ReverbNation, HearThis.at, Apple Podcasts, Google Podcasts,
-    Vimeo, Dailymotion, Bilibili, Twitch, Kick, Rumble, Streamable, OK.ru, Coub,
-    Odysee, Bitchute, Ted, Loom, Rutube, Archive.org, Youku, iQiyi, Instagram,
-    TikTok/Douyin, Twitter/X, Facebook, Pinterest, Reddit, Snapchat, Threads,
-    Tumblr, VK, Likee, Triller, Kwai, ShareChat, Moj, Josh, Bluesky, Mastodon,
-    Weibo, Kuaishou, Patreon, Discord, Line, LinkedIn, Terabox, Google Drive,
-    Dropbox, OneDrive, Mediafire, Mega, Yandex Disk, Catbox, QQ Music, NetEase,
-    Kugou, Kuwo, Zing MP3, NhacCuaTui, Joox, and direct audio/video streams.
+    Universal media player and extractor supporting 80+ platforms.
     """
 
     PLATFORM_PATTERNS = [
-        # --- Primary Music & Audio Services ---
         ("spotify", r"(?:open\.|music\.)?spotify\.com|spotify:"),
         ("applemusic", r"(?:music|itunes)\.apple\.com"),
         ("jiosaavn", r"(?:jiosaavn|saavn)\.com"),
@@ -201,7 +183,6 @@ class YouTube:
         ("anchor", r"anchor\.fm"),
         ("podcasts_apple", r"podcasts\.apple\.com"),
         ("podcasts_google", r"podcasts\.google\.com"),
-        # --- Video & Livestreaming Platforms ---
         ("vimeo", r"vimeo\.com"),
         ("dailymotion", r"(?:dailymotion\.com|dai\.ly)"),
         ("bilibili", r"(?:bilibili\.com|b23\.tv)"),
@@ -221,7 +202,6 @@ class YouTube:
         ("iqiyi", r"(?:iq\.com|iqiyi\.com)"),
         ("mxplayer", r"mxplayer\.in"),
         ("imdb", r"imdb\.com"),
-        # --- Social Media & Short-form Video ---
         ("instagram", r"(?:instagram\.com|instagr\.am)"),
         ("tiktok", r"(?:tiktok\.com|douyin\.com)"),
         ("twitter", r"(?:twitter\.com|(?:^|[\/\.])x\.com)"),
@@ -246,7 +226,6 @@ class YouTube:
         ("discord", r"(?:discord\.com|discordapp\.com)"),
         ("line", r"(?:line\.me|linevoom\.line\.me)"),
         ("linkedin", r"linkedin\.com"),
-        # --- Cloud Storage & File Hosts ---
         ("terabox", r"(?:terabox|1024tera)"),
         ("google_drive", r"drive\.google\.com"),
         ("dropbox", r"dropbox\.com"),
@@ -255,7 +234,6 @@ class YouTube:
         ("mega", r"mega\.(?:nz|io)"),
         ("yandex_disk", r"disk\.yandex\.(?:ru|com)"),
         ("catbox", r"(?:catbox\.moe|files\.catbox\.moe)"),
-        # --- Asian Regional Music Services ---
         ("qqmusic", r"(?:y\.qq\.com|qq\.com)"),
         ("netease", r"music\.163\.com"),
         ("kugou", r"kugou\.com"),
@@ -291,7 +269,8 @@ class YouTube:
         self.checked = False
         self.cookie_dir = "KartikMusic/cookies"
         self.warned = False
-        self._recent_prefetches = {}  # vidid -> timestamp
+        self._recent_prefetches = {}
+        self._search_cache: dict[str, tuple[float, Track]] = {}
         self.regex = re.compile(
             r"(https?://)?(www\.|m\.|music\.)?"
             r"(youtube\.com/(watch\?v=|shorts/|playlist\?list=)|youtu\.be/)"
@@ -308,7 +287,7 @@ class YouTube:
     async def get_client(self):
         if self._client is None or self._client.closed:
             self._client = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=600.0, connect=10.0)
+                timeout=aiohttp.ClientTimeout(total=30.0, connect=5.0, sock_connect=5.0)
             )
         return self._client
 
@@ -321,31 +300,23 @@ class YouTube:
         return params
 
     def detect_platform(self, url_or_query: str) -> str:
-        """
-        Auto-detect the platform of a given URL or query.
-        Returns the platform identifier string (e.g. 'spotify', 'youtube', 'jiosaavn').
-        """
         s = str(url_or_query).strip()
         if not s:
             return "generic"
-
         if s.startswith("spot_"):
             return "spotify"
-
         if re.match(r"^[a-zA-Z0-9_-]{11}$", s):
             return "youtube"
-
         for platform, pattern in self.PLATFORM_PATTERNS:
             if re.search(pattern, s, re.IGNORECASE):
                 return platform
-
         if "http://" in s or "https://" in s:
             return "generic"
-
         return "youtube"
 
     def get_cookies(self):
         if not self.checked:
+            os.makedirs(self.cookie_dir, exist_ok=True)
             for file in os.listdir(self.cookie_dir):
                 if file.endswith(".txt"):
                     self.cookies.append(f"{self.cookie_dir}/{file}")
@@ -359,14 +330,28 @@ class YouTube:
 
     async def save_cookies(self, urls: list[str]) -> None:
         logger.info("Saving cookies from urls...")
-        async with aiohttp.ClientSession() as session:
-            for url in urls:
-                name = url.split("/")[-1]
-                link = "https://batbin.me/raw/" + name
-                async with session.get(link) as resp:
-                    resp.raise_for_status()
-                    with open(f"{self.cookie_dir}/{name}.txt", "wb") as fw:
-                        fw.write(await resp.read())
+        os.makedirs(self.cookie_dir, exist_ok=True)
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15.0)
+        ) as session:
+            for idx, url in enumerate(urls):
+                if not url:
+                    continue
+                if url.startswith(("http://", "https://")):
+                    link = url
+                else:
+                    name = url.split("/")[-1]
+                    link = "https://batbin.me/raw/" + name
+                try:
+                    async with session.get(link) as resp:
+                        resp.raise_for_status()
+                        file_path = f"{self.cookie_dir}/cookies_{idx}.txt"
+                        with open(file_path, "wb") as fw:
+                            fw.write(await resp.read())
+                except Exception as e:
+                    logger.warning(f"Failed to download cookie from {link}: {e}")
+        self.checked = False
+        self.cookies.clear()
         logger.info(f"Cookies saved in {self.cookie_dir}.")
 
     def valid(self, url: str) -> bool:
@@ -375,23 +360,18 @@ class YouTube:
         s = url.strip()
         if not s:
             return False
-
         if bool(re.match(self.regex, s)):
             return True
-
         if s.startswith("spot_") or re.match(r"^[a-zA-Z0-9_-]{11}$", s):
             return True
-
         for _, pattern in self.PLATFORM_PATTERNS:
             if re.search(pattern, s, re.IGNORECASE):
                 return True
-
         return bool(re.match(r"^https?://[^\s]+", s))
 
     def invalid(self, url: str) -> bool:
         if not url:
             return False
-        # If it matches any recognized platform, it is NOT invalid
         for _, pattern in self.PLATFORM_PATTERNS:
             if re.search(pattern, url, re.IGNORECASE):
                 return False
@@ -412,21 +392,15 @@ class YouTube:
     def get_stream_url(
         self, query_or_id: str, dl_type: str = "audio", quality: int = 720
     ) -> str:
-        """
-        Construct a direct stream / download URL with API key for music bots.
-        """
         safe_query = urllib.parse.quote(str(query_or_id).strip())
         extension = "mp3" if dl_type == "audio" else "mp4"
-
         if self.api_key:
             return f"{self.api_url}/downloads/{self.api_key}/{safe_query}.{extension}"
-
         return f"{self.api_url}/download?query={safe_query}&dl_type={dl_type}&quality={quality}"
 
     async def download_track(
         self, link: str, chat_id: int | None = None, *args, **kwargs
     ) -> str | None:
-        """Voicechat bot helper: construct direct stream URL and ensure initial chunk is buffered."""
         return await self.download(link, video=False)
 
     async def stream(
@@ -436,15 +410,31 @@ class YouTube:
         *args,
         **kwargs,
     ) -> str | None:
-        """Streaming helper: construct stream URL and buffer initial 64 KB (65536 bytes) chunk."""
         return await self.download(video_id, video=video, *args, **kwargs)
 
     async def search(self, query: str, m_id: int, video: bool = False) -> Track | None:
+        cache_key = f"{query.strip().lower()}_{int(video)}"
+        now = time.time()
+        cached = self._search_cache.get(cache_key)
+        if cached and (now - cached[0]) < 300:
+            base_track = cached[1]
+            return Track(
+                id=base_track.id,
+                channel_name=base_track.channel_name,
+                duration=base_track.duration,
+                duration_sec=base_track.duration_sec,
+                message_id=m_id,
+                title=base_track.title,
+                thumbnail=base_track.thumbnail,
+                url=base_track.url,
+                view_count=base_track.view_count,
+                video=video,
+            )
+
         client = await self.get_client()
         platform = self.detect_platform(query)
         is_url = bool(re.match(r"^https?://", query.strip()))
 
-        # Helper to format duration seconds to MM:SS or HH:MM:SS
         def _fmt_duration(val: Any) -> str:
             if not val or val == "00:00":
                 return "00:00"
@@ -464,17 +454,24 @@ class YouTube:
             except Exception:
                 return "00:00"
 
-        # If it's a non-YouTube platform URL, resolve details first
+        def _store_and_return(trk: Track) -> Track:
+            if len(self._search_cache) > 250:
+                self._search_cache.clear()
+            self._search_cache[cache_key] = (now, trk)
+            return trk
+
         if is_url and platform != "youtube":
             try:
-                # 1. Try /details endpoint
                 params = self._get_params({"link": query})
-                async with client.get(f"{self.api_url}/details", params=params) as resp:
+                async with client.get(
+                    f"{self.api_url}/details",
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=6),
+                ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         if data and data.get("title"):
                             vidid = data.get("id") or data.get("vidid")
-                            # Check if download_url contains a valid 11-char YouTube ID
                             dl_url = data.get("download_url") or ""
                             dl_match = re.search(
                                 r"/([A-Za-z0-9_-]{11})(?:$|\?|\.|\/)", dl_url
@@ -492,7 +489,6 @@ class YouTube:
                             duration = _fmt_duration(dur_raw)
                             thumb = data.get("thumb") or data.get("thumbnail", "")
 
-                            # If vidid is not a standard 11-char YouTube ID, resolve to YouTube
                             if not vidid or not re.match(r"^[A-Za-z0-9_-]{11}$", vidid):
                                 yt_match = await self.search(
                                     f"{title} {data.get('artist', '')}".strip(),
@@ -508,119 +504,56 @@ class YouTube:
                                         )
                                     if thumb:
                                         yt_match.thumbnail = thumb
-                                    return yt_match
-
-                            if not duration or duration == "00:00":
-                                yt_match = await self.search(title, m_id, video=video)
-                                if yt_match:
-                                    duration = yt_match.duration
+                                    return _store_and_return(yt_match)
 
                             ytlink = f"https://www.youtube.com/watch?v={vidid}"
-                            return Track(
-                                id=vidid,
-                                channel_name=data.get("artist")
-                                or platform.capitalize(),
-                                duration=duration,
-                                duration_sec=utils.to_seconds(duration),
-                                message_id=m_id,
-                                title=title[:25],
-                                thumbnail=thumb
-                                or f"https://i.ytimg.com/vi/{vidid}/hqdefault.jpg",
-                                url=ytlink,
-                                view_count="",
-                                video=video,
+                            return _store_and_return(
+                                Track(
+                                    id=vidid,
+                                    channel_name=data.get("artist")
+                                    or platform.capitalize(),
+                                    duration=duration,
+                                    duration_sec=utils.to_seconds(duration),
+                                    message_id=m_id,
+                                    title=title[:25],
+                                    thumbnail=thumb
+                                    or f"https://i.ytimg.com/vi/{vidid}/hqdefault.jpg",
+                                    url=ytlink,
+                                    view_count="",
+                                    video=video,
+                                )
                             )
             except Exception as e:
                 logger.error(f"Error fetching details for {query}: {e}")
 
-            # 2. Try /api/get endpoint
-            try:
-                params = self._get_params({"url": query})
-                async with client.get(f"{self.api_url}/api/get", params=params) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data and data.get("title"):
-                            dl_url = data.get("download_url") or ""
-                            dl_match = re.search(
-                                r"/([A-Za-z0-9_-]{11})(?:$|\?|\.|\/)", dl_url
-                            )
-                            vidid = (
-                                dl_match.group(1)
-                                if dl_match
-                                else (
-                                    data.get("id")
-                                    if data.get("platform") == "youtube"
-                                    else None
-                                )
-                            )
-
-                            title = data.get("title", "Track")
-                            dur_raw = (
-                                data.get("duration_string")
-                                or data.get("duration_min")
-                                or data.get("duration_sec")
-                                or data.get("duration")
-                            )
-                            duration = _fmt_duration(dur_raw)
-                            thumb = data.get("thumbnail") or data.get("thumb", "")
-
-                            if not vidid or not re.match(r"^[A-Za-z0-9_-]{11}$", vidid):
-                                yt_match = await self.search(title, m_id, video=video)
-                                if yt_match:
-                                    yt_match.title = title[:25]
-                                    if duration and duration != "00:00":
-                                        yt_match.duration = duration
-                                        yt_match.duration_sec = utils.to_seconds(
-                                            duration
-                                        )
-                                    if thumb:
-                                        yt_match.thumbnail = thumb
-                                    return yt_match
-
-                            if not duration or duration == "00:00":
-                                yt_match = await self.search(title, m_id, video=video)
-                                if yt_match:
-                                    duration = yt_match.duration
-
-                            ytlink = f"https://www.youtube.com/watch?v={vidid}"
-                            return Track(
-                                id=vidid,
-                                channel_name=platform.capitalize(),
-                                duration=duration,
-                                duration_sec=utils.to_seconds(duration),
-                                message_id=m_id,
-                                title=title[:25],
-                                thumbnail=thumb
-                                or f"https://i.ytimg.com/vi/{vidid}/hqdefault.jpg",
-                                url=ytlink,
-                                view_count="",
-                                video=video,
-                            )
-            except Exception as e:
-                logger.error(f"Error extracting metadata for {query}: {e}")
-
-        # Regular search via API
+        # Primary search via API with fast timeout
         params = self._get_params({"query": query, "limit": 1})
         try:
-            async with client.get(f"{self.api_url}/search", params=params) as response:
+            async with client.get(
+                f"{self.api_url}/search",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as response:
                 if response.status == 200:
                     result_data = await response.json()
                     result = result_data.get("result")
                     if result:
                         data = result[0]
-                        return Track(
-                            id=data.get("id"),
-                            channel_name=data.get("channel", {}).get("name"),
-                            duration=data.get("duration"),
-                            duration_sec=utils.to_seconds(data.get("duration")),
-                            message_id=m_id,
-                            title=data.get("title")[:25],
-                            thumbnail=data.get("thumbnails", [{}])[-1]
-                            .get("url")
-                            .split("?")[0],
-                            url=data.get("link"),
-                            view_count=data.get("viewCount", {}).get("short"),
-                            video=video,
+                        return _store_and_return(
+                            Track(
+                                id=data.get("id"),
+                                channel_name=data.get("channel", {}).get("name"),
+                                duration=data.get("duration"),
+                                duration_sec=utils.to_seconds(data.get("duration")),
+                                message_id=m_id,
+                                title=data.get("title")[:25],
+                                thumbnail=data.get("thumbnails", [{}])[-1]
+                                .get("url")
+                                .split("?")[0],
+                                url=data.get("link"),
+                                view_count=data.get("viewCount", {}).get("short"),
+                                video=video,
+                            )
                         )
         except Exception as e:
             logger.error(f"Error in search from API: {e}")
@@ -628,40 +561,48 @@ class YouTube:
         # Fallback to py_yt VideosSearch
         try:
             _search = VideosSearch(query, limit=1, with_live=False)
-            results = await _search.next()
+            results = await asyncio.wait_for(_search.next(), timeout=5)
             if results and results["result"]:
                 data = results["result"][0]
-                return Track(
-                    id=data.get("id"),
-                    channel_name=data.get("channel", {}).get("name"),
-                    duration=data.get("duration"),
-                    duration_sec=utils.to_seconds(data.get("duration")),
-                    message_id=m_id,
-                    title=data.get("title")[:25],
-                    thumbnail=data.get("thumbnails", [{}])[-1].get("url").split("?")[0],
-                    url=data.get("link"),
-                    view_count=data.get("viewCount", {}).get("short"),
-                    video=video,
+                return _store_and_return(
+                    Track(
+                        id=data.get("id"),
+                        channel_name=data.get("channel", {}).get("name"),
+                        duration=data.get("duration"),
+                        duration_sec=utils.to_seconds(data.get("duration")),
+                        message_id=m_id,
+                        title=data.get("title")[:25],
+                        thumbnail=data.get("thumbnails", [{}])[-1]
+                        .get("url")
+                        .split("?")[0],
+                        url=data.get("link"),
+                        view_count=data.get("viewCount", {}).get("short"),
+                        video=video,
+                    )
                 )
         except Exception:
             pass
 
-        # Local yt-dlp search fallback
+        # Last-resort local yt-dlp search fallback
         try:
             res_local = await asyncio.to_thread(_safe_search_ytdlp, query)
             if res_local and res_local.get("result"):
                 data = res_local["result"][0]
-                return Track(
-                    id=data.get("id"),
-                    channel_name="YouTube",
-                    duration=data.get("duration"),
-                    duration_sec=utils.to_seconds(data.get("duration")),
-                    message_id=m_id,
-                    title=data.get("title")[:25],
-                    thumbnail=data.get("thumbnails", [{}])[-1].get("url").split("?")[0],
-                    url=data.get("link"),
-                    view_count="",
-                    video=video,
+                return _store_and_return(
+                    Track(
+                        id=data.get("id"),
+                        channel_name="YouTube",
+                        duration=data.get("duration"),
+                        duration_sec=utils.to_seconds(data.get("duration")),
+                        message_id=m_id,
+                        title=data.get("title")[:25],
+                        thumbnail=data.get("thumbnails", [{}])[-1]
+                        .get("url")
+                        .split("?")[0],
+                        url=data.get("link"),
+                        view_count="",
+                        video=video,
+                    )
                 )
         except Exception:
             pass
@@ -676,7 +617,9 @@ class YouTube:
         params = self._get_params({"link": url, "limit": limit})
         try:
             async with client.get(
-                f"{self.api_url}/playlist", params=params
+                f"{self.api_url}/playlist",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=8),
             ) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -686,12 +629,7 @@ class YouTube:
                     if videos:
                         tracks = []
                         for item in videos:
-                            if isinstance(item, str):
-                                track_obj = await self.search(item, 0, video=video)
-                                if track_obj:
-                                    track_obj.user = user
-                                    tracks.append(track_obj)
-                            elif isinstance(item, dict):
+                            if isinstance(item, dict):
                                 vid_id = item.get("id")
                                 title = item.get("title") or item.get("name") or "Track"
                                 duration = item.get("duration", "00:00")
@@ -723,7 +661,6 @@ class YouTube:
         except Exception as e:
             logger.error(f"Error fetching playlist from API: {e}")
 
-        # Fallback to py_yt Playlist
         tracks = []
         try:
             plist = await Playlist.get(url)
@@ -746,45 +683,9 @@ class YouTube:
         return tracks
 
     async def prefetch(self, link: str, video: bool = False):
-        """Triggers background pre-fetching on the API"""
-        dl_type = "video" if video else "audio"
-        link = self._clean_link(link)
-
-        import time
-
-        now = time.time()
-        regex = (
-            r"(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)"
-            r"([^\"&?\/\s]{11})"
-        )
-        match = re.search(regex, link)
-        vidid = match.group(1) if match else link
-
-        cache_key = f"{vidid}_{dl_type}"
-        if cache_key in self._recent_prefetches:
-            if now - self._recent_prefetches[cache_key] < 30:
-                return True
-
-        self._recent_prefetches[cache_key] = now
-
-        if len(self._recent_prefetches) > 100:
-            self._recent_prefetches = {
-                k: v for k, v in self._recent_prefetches.items() if now - v < 300
-            }
-
-        client = await self.get_client()
-        params = self._get_params(
-            {"query": link, "dl_type": dl_type, "prefetch": "true"}
-        )
-        try:
-            async with client.get(f"{self.api_url}/download", params=params):
-                return True
-        except Exception as e:
-            logger.error(f"Prefetch failed for {link}: {e}")
         return False
 
     async def _innertube_search(self, query: str, limit: int = 1) -> list[dict]:
-        """Search YouTube directly via InnerTube API, exactly matching TgMusicBot."""
         client = await self.get_client()
         for prof in YT_PROFILES:
             try:
@@ -815,7 +716,7 @@ class YouTube:
                     url,
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=8),
+                    timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
                     if resp.status != 200:
                         continue
@@ -867,10 +768,7 @@ class YouTube:
                             stack.extend(curr)
                     if tracks:
                         return tracks
-            except Exception as e:
-                logger.debug(
-                    f"Innertube search failed on profile {prof['clientName']}: {e}"
-                )
+            except Exception:
                 continue
         return []
 
@@ -892,10 +790,6 @@ class YouTube:
                 if profile.get("origin"):
                     headers["Origin"] = profile["origin"]
                     headers["Referer"] = profile["origin"] + "/"
-                    headers["Sec-Fetch-Mode"] = "cors"
-                    headers["Sec-Fetch-Site"] = "same-origin"
-                    headers["Sec-Fetch-Dest"] = "empty"
-
                 payload = {
                     "context": {
                         "client": {
@@ -911,12 +805,11 @@ class YouTube:
                     url,
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=8),
+                    timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
                     if resp.status != 200:
                         continue
                     data = await resp.json()
-
                     contents = (
                         data.get("contents", {})
                         .get("twoColumnWatchNextResults", {})
@@ -924,9 +817,6 @@ class YouTube:
                         .get("playlist", {})
                         .get("contents", [])
                     )
-                    if not contents:
-                        continue
-
                     for item in contents:
                         renderer = item.get("playlistPanelVideoRenderer")
                         if not renderer:
@@ -934,7 +824,6 @@ class YouTube:
                         vid = renderer.get("videoId")
                         if not vid:
                             continue
-
                         title_data = renderer.get("title", {})
                         title = (
                             title_data.get("simpleText")
@@ -943,7 +832,6 @@ class YouTube:
                             )
                             or "Track"
                         )
-
                         channel_data = renderer.get(
                             "shortBylineText", {}
                         ) or renderer.get("longBylineText", {})
@@ -953,25 +841,21 @@ class YouTube:
                             )
                             or "YouTube"
                         )
-
                         duration_str = (
                             renderer.get("lengthText", {}).get("simpleText") or "00:00"
                         )
-                        dur_sec = utils.to_seconds(duration_str)
-
                         thumbs = renderer.get("thumbnail", {}).get("thumbnails", [])
                         thumb = (
                             thumbs[-1]["url"].split("?")[0]
                             if thumbs
                             else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
                         )
-
                         results.append(
                             Track(
                                 id=vid,
                                 channel_name=channel,
                                 duration=duration_str,
-                                duration_sec=dur_sec,
+                                duration_sec=utils.to_seconds(duration_str),
                                 title=title,
                                 thumbnail=thumb,
                                 url=f"https://www.youtube.com/watch?v={vid}",
@@ -981,164 +865,18 @@ class YouTube:
                         )
                     if results:
                         break
-            except Exception as e:
-                logger.debug(f"Innertube profile {profile['clientName']} failed: {e}")
+            except Exception:
                 continue
-
-        # If RD{video_id} returned nothing, fallback to related watch-next secondaryResults
-        if not results:
-            for profile in YT_PROFILES:
-                try:
-                    url = f"https://www.youtube.com/youtubei/v1/next?key={YT_API_KEY}"
-                    headers = {
-                        "Content-Type": "application/json",
-                        "User-Agent": profile["userAgent"],
-                        "Accept": "*/*",
-                        "Accept-Language": "en-US,en;q=0.9",
-                        "X-YouTube-Client-Name": profile["clientId"],
-                        "X-YouTube-Client-Version": profile["clientVersion"],
-                    }
-                    if profile.get("origin"):
-                        headers["Origin"] = profile["origin"]
-                        headers["Referer"] = profile["origin"] + "/"
-                    payload = {
-                        "context": {
-                            "client": {
-                                "clientName": profile["clientName"],
-                                "clientVersion": profile["clientVersion"],
-                                "hl": "en",
-                                "gl": "US",
-                            }
-                        },
-                        "videoId": video_id,
-                    }
-                    async with client.post(
-                        url,
-                        json=payload,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=8),
-                    ) as resp:
-                        if resp.status != 200:
-                            continue
-                        data = await resp.json()
-                        sec_results = (
-                            data.get("contents", {})
-                            .get("twoColumnWatchNextResults", {})
-                            .get("secondaryResults", {})
-                            .get("secondaryResults", {})
-                            .get("results", [])
-                        )
-                        for r in sec_results:
-                            cvr = r.get("compactVideoRenderer")
-                            if cvr:
-                                vid = cvr.get("videoId")
-                                if not vid:
-                                    continue
-                                title = (
-                                    cvr.get("title", {}).get("simpleText")
-                                    or "".join(
-                                        x.get("text", "")
-                                        for x in cvr.get("title", {}).get("runs", [])
-                                    )
-                                    or "Track"
-                                )
-                                dur_str = cvr.get("lengthText", {}).get(
-                                    "simpleText", "00:00"
-                                )
-                                thumbs = cvr.get("thumbnail", {}).get("thumbnails", [])
-                                thumb = (
-                                    thumbs[-1]["url"].split("?")[0]
-                                    if thumbs
-                                    else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
-                                )
-                                channel = (
-                                    "".join(
-                                        x.get("text", "")
-                                        for x in cvr.get("shortBylineText", {}).get(
-                                            "runs", []
-                                        )
-                                    )
-                                    or "YouTube"
-                                )
-                                results.append(
-                                    Track(
-                                        id=vid,
-                                        channel_name=channel,
-                                        duration=dur_str,
-                                        duration_sec=utils.to_seconds(dur_str),
-                                        title=title,
-                                        thumbnail=thumb,
-                                        url=f"https://www.youtube.com/watch?v={vid}",
-                                        user="Autoplay",
-                                        video=False,
-                                    )
-                                )
-                            lvm = r.get("lockupViewModel")
-                            if (
-                                lvm
-                                and lvm.get("contentType")
-                                == "LOCKUP_CONTENT_TYPE_VIDEO"
-                            ):
-                                vid = lvm.get("contentId")
-                                if not vid or len(vid) != 11:
-                                    continue
-                                meta = lvm.get("metadata", {}).get(
-                                    "lockupMetadataViewModel", {}
-                                )
-                                title = meta.get("title", {}).get("content", "Track")
-                                image = lvm.get("contentImage", {}).get(
-                                    "thumbnailViewModel", {}
-                                )
-                                thumbs = image.get("image", {}).get("sources", [])
-                                thumb = (
-                                    thumbs[-1]["url"].split("?")[0]
-                                    if thumbs
-                                    else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
-                                )
-                                dur_str = "00:00"
-                                for overlay in image.get("overlays", []):
-                                    for badge in overlay.get(
-                                        "thumbnailBottomOverlayViewModel", {}
-                                    ).get("badges", []):
-                                        t_text = badge.get(
-                                            "thumbnailBadgeViewModel", {}
-                                        ).get("text", "")
-                                        if ":" in t_text:
-                                            dur_str = t_text
-                                results.append(
-                                    Track(
-                                        id=vid,
-                                        channel_name="YouTube",
-                                        duration=dur_str,
-                                        duration_sec=utils.to_seconds(dur_str),
-                                        title=title,
-                                        thumbnail=thumb,
-                                        url=f"https://www.youtube.com/watch?v={vid}",
-                                        user="Autoplay",
-                                        video=False,
-                                    )
-                                )
-                        if results:
-                            break
-                except Exception as e:
-                    logger.debug(f"Secondary results failed: {e}")
-                    continue
-
         return results
 
     async def get_recommendations(
         self, target: str, limit: int | None = None
     ) -> list[Track]:
-        """
-        Fetch recommended tracks for a given track URL, ID, or query, exactly matching TgMusicBot's GetRecommendations.
-        """
         if not limit or limit <= 0:
             limit = getattr(config, "AUTO_PLAY_LIMIT", 15)
-
         target_clean = str(target).strip()
         if not target_clean:
             return []
-
         if len(target_clean) == 11 and not any(c in target_clean for c in " /?:"):
             url_to_use = f"https://www.youtube.com/watch?v={target_clean}"
             seed_id = target_clean
@@ -1146,17 +884,14 @@ class YouTube:
             url_to_use = target_clean
             seed_id = extract_video_id(url_to_use)
 
-        # If target is not a URL, resolve seed via InnerTube search (matching TgMusicBot)
-        if not url_to_use.lower().startswith(
-            "http://"
-        ) and not url_to_use.lower().startswith("https://"):
+        if not url_to_use.lower().startswith(("http://", "https://")):
             try:
                 matches = await self._innertube_search(url_to_use, limit=1)
                 if matches:
                     url_to_use = matches[0]["url"]
                     seed_id = matches[0]["id"]
-            except Exception as e:
-                logger.debug(f"Innertube seed search failed: {e}")
+            except Exception:
+                pass
 
         if not seed_id:
             try:
@@ -1170,22 +905,16 @@ class YouTube:
         if not seed_id:
             return []
 
-        # 1. Native YouTube Mix (Innertube Next API - matching TgMusicBot)
         tracks = await self._fetch_innertube_mix(seed_id, limit=limit)
-
-        # Filter out seed ID and duplicates preserving order
         seen = set()
         unique_tracks: list[Track] = []
         for t in tracks:
-            if t.id == seed_id or t.url == url_to_use:
-                continue
-            if t.id in seen:
+            if t.id == seed_id or t.url == url_to_use or t.id in seen:
                 continue
             seen.add(t.id)
             unique_tracks.append(t)
             if len(unique_tracks) >= limit:
                 break
-
         return unique_tracks
 
     async def get_related(
@@ -1195,18 +924,9 @@ class YouTube:
         video: bool = False,
         max_duration: int = 0,
     ) -> Track | None:
-        """
-        Get the next recommended track for autoplay, matching TgMusicBot's handleAutoplay:
-        - Retrieves recommendations via GetRecommendations
-        - Filters out already played tracks using chat autoplay history
-        - Enforces duration limits
-        - Randomly shuffles candidates
-        - Updates autoplay history
-        """
         from KartikMusic import queue
 
         history = queue.get_autoplay_history(chat_id) if chat_id else []
-
         limit = getattr(config, "AUTO_PLAY_LIMIT", 15)
         if len(history) >= limit and chat_id:
             queue.clear_autoplay_history(chat_id)
@@ -1216,21 +936,16 @@ class YouTube:
         if not tracks:
             return None
 
-        candidates: list[Track] = []
-        for track in tracks:
-            if (
-                track.id == video_id
-                or track.url == video_id
-                or track.id in history
-                or track.url in history
-            ):
-                continue
-            if max_duration > 0 and track.duration_sec > max_duration:
-                continue
-            candidates.append(track)
+        candidates: list[Track] = [
+            track
+            for track in tracks
+            if track.id != video_id
+            and track.url != video_id
+            and track.id not in history
+            and track.url not in history
+            and (max_duration <= 0 or track.duration_sec <= max_duration)
+        ]
 
-        # If all candidates have been played in this session, clear history
-        # so music playback continues seamlessly without repeating immediately
         if not candidates:
             if chat_id:
                 queue.clear_autoplay_history(chat_id)
@@ -1245,11 +960,8 @@ class YouTube:
         if not candidates:
             return None
 
-        # Randomly shuffle candidates like TgMusicBot
         random.shuffle(candidates)
         next_track = candidates[0]
-
-        # Update autoplay history
         if chat_id:
             queue.add_autoplay_history(chat_id, video_id, next_track.id)
 
@@ -1266,7 +978,6 @@ class YouTube:
     ) -> str | None:
         raw_target = str(video_id).strip()
         is_url = bool(re.match(r"^https?://", raw_target))
-        # If not a URL and not a valid 11-char YouTube ID, resolve to a YouTube video ID
         actual_id = raw_target
         if not is_url and not re.match(r"^[A-Za-z0-9_-]{11}$", raw_target):
             try:
@@ -1281,35 +992,16 @@ class YouTube:
         url = actual_id if is_url else (self.base + actual_id)
         dl_type = "video" if video else "audio"
 
-        asyncio.create_task(self.prefetch(url, video=video))
-
         if self.api_key:
             safe_query = urllib.parse.quote(
                 url if is_url else f"youtube.com/{actual_id}"
             )
             ext = "mp4" if video else "mp3"
-            stream_url = f"{self.api_url}/downloads/{self.api_key}/{safe_query}.{ext}"
-        else:
-            stream_url = await download_assistant(url, dl_type)
+            return f"{self.api_url}/downloads/{self.api_key}/{safe_query}.{ext}"
 
-        try:
-            client = await self.get_client()
-            async with client.get(stream_url, timeout=30) as resp:
-                if resp.status in [200, 206]:
-                    await resp.content.read(self.chunk_size)
-                else:
-                    logger.warning(
-                        f"Download stream URL returned status {resp.status} for {video_id}"
-                    )
-        except Exception as e:
-            logger.warning(
-                f"Error checking download stream readiness for {video_id}: {e}"
-            )
-
-        return stream_url
+        return await download_assistant(url, dl_type)
 
     async def extract_async(self, url: str) -> dict[str, Any]:
-        """Async multi-platform extractor using master /api/get endpoint."""
         client = await self.get_client()
         async with client.get(
             f"{self.api_url}/api/get", params=self._get_params({"url": url})
@@ -1318,7 +1010,6 @@ class YouTube:
             return await resp.json()
 
     async def search_async(self, query: str, limit: int = 5) -> dict[str, Any]:
-        """Search multi-platform media using /search endpoint."""
         client = await self.get_client()
         async with client.get(
             f"{self.api_url}/search",
@@ -1328,7 +1019,6 @@ class YouTube:
             return await resp.json()
 
     async def details_async(self, link_or_id: str) -> dict[str, Any]:
-        """Fetch track metadata details using /details endpoint."""
         client = await self.get_client()
         async with client.get(
             f"{self.api_url}/details", params=self._get_params({"link": link_or_id})
