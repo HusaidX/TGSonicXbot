@@ -1,13 +1,7 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
 # All rights reserved.
-#
 
+
+import asyncio
 from pathlib import Path
 
 from pyrogram import filters, types
@@ -46,11 +40,12 @@ async def play_hndlr(
     except Exception:
         sent = await app.send_message(m.chat.id, m.lang["play_searching"])
 
-    if await db.get_cmd_delete(m.chat.id):
-        try:
-            await m.delete()
-        except Exception:
-            pass
+    del_cmd_task = (
+        asyncio.create_task(m.delete())
+        if await db.get_cmd_delete(m.chat.id)
+        else None
+    )
+
     file = None
     mention = m.from_user.mention
     media = tg.get_media(m.reply_to_message) if m.reply_to_message else None
@@ -99,7 +94,7 @@ async def play_hndlr(
         )
 
     if await db.is_logger():
-        await utils.play_log(m, sent.link, file.title, file.duration)
+        asyncio.create_task(utils.play_log(m, sent.link, file.title, file.duration))
 
     file.user = mention
     if force:
@@ -139,10 +134,16 @@ async def play_hndlr(
         if Path(fname).exists():
             file.file_path = fname
         else:
-            await sent.edit_text(m.lang["play_downloading"])
             file.file_path = await yt.download(file.id, video=video)
 
     await Kartik.play_media(chat_id=m.chat.id, message=sent, media=file)
+
+    if del_cmd_task:
+        try:
+            await del_cmd_task
+        except Exception:
+            pass
+
     if not tracks:
         return
     added = playlist_to_queue(m.chat.id, tracks)
