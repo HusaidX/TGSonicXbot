@@ -466,7 +466,7 @@ class YouTube:
                 async with client.get(
                     f"{self.api_url}/details",
                     params=params,
-                    timeout=aiohttp.ClientTimeout(total=6),
+                    timeout=aiohttp.ClientTimeout(total=5),
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -489,79 +489,100 @@ class YouTube:
                             duration = _fmt_duration(dur_raw)
                             thumb = data.get("thumb") or data.get("thumbnail", "")
 
-                            if not vidid or not re.match(r"^[A-Za-z0-9_-]{11}$", vidid):
-                                yt_match = await self.search(
-                                    f"{title} {data.get('artist', '')}".strip(),
-                                    m_id,
-                                    video=video,
+                            if vidid and re.match(r"^[A-Za-z0-9_-]{11}$", vidid):
+                                ytlink = f"https://www.youtube.com/watch?v={vidid}"
+                                return _store_and_return(
+                                    Track(
+                                        id=vidid,
+                                        channel_name=data.get("artist")
+                                        or platform.capitalize(),
+                                        duration=duration,
+                                        duration_sec=utils.to_seconds(duration),
+                                        message_id=m_id,
+                                        title=title[:25],
+                                        thumbnail=thumb
+                                        or f"https://i.ytimg.com/vi/{vidid}/hqdefault.jpg",
+                                        url=ytlink,
+                                        view_count="",
+                                        video=video,
+                                    )
                                 )
-                                if yt_match:
-                                    yt_match.title = title[:25]
-                                    if duration and duration != "00:00":
-                                        yt_match.duration = duration
-                                        yt_match.duration_sec = utils.to_seconds(
-                                            duration
-                                        )
-                                    if thumb:
-                                        yt_match.thumbnail = thumb
-                                    return _store_and_return(yt_match)
-
-                            ytlink = f"https://www.youtube.com/watch?v={vidid}"
-                            return _store_and_return(
-                                Track(
-                                    id=vidid,
-                                    channel_name=data.get("artist")
-                                    or platform.capitalize(),
-                                    duration=duration,
-                                    duration_sec=utils.to_seconds(duration),
-                                    message_id=m_id,
-                                    title=title[:25],
-                                    thumbnail=thumb
-                                    or f"https://i.ytimg.com/vi/{vidid}/hqdefault.jpg",
-                                    url=ytlink,
-                                    view_count="",
-                                    video=video,
-                                )
-                            )
             except Exception as e:
                 logger.error(f"Error fetching details for {query}: {e}")
 
-        # Primary search via API with fast timeout
-        params = self._get_params({"query": query, "limit": 1})
-        try:
+        async def _from_api() -> Track | None:
+            params = self._get_params({"query": query, "limit": 1})
             async with client.get(
                 f"{self.api_url}/search",
                 params=params,
-                timeout=aiohttp.ClientTimeout(total=5),
+                timeout=aiohttp.ClientTimeout(total=3.5),
             ) as response:
                 if response.status == 200:
                     result_data = await response.json()
                     result = result_data.get("result")
                     if result:
                         data = result[0]
-                        return _store_and_return(
-                            Track(
-                                id=data.get("id"),
-                                channel_name=data.get("channel", {}).get("name"),
-                                duration=data.get("duration"),
-                                duration_sec=utils.to_seconds(data.get("duration")),
-                                message_id=m_id,
-                                title=data.get("title")[:25],
-                                thumbnail=data.get("thumbnails", [{}])[-1]
-                                .get("url")
-                                .split("?")[0],
-                                url=data.get("link"),
-                                view_count=data.get("viewCount", {}).get("short"),
-                                video=video,
-                            )
+                        thumbs = data.get("thumbnails") or []
+                        thumb = (
+                            thumbs[-1].get("url", "").split("?")[0]
+                            if thumbs
+                            else f"https://i.ytimg.com/vi/{data.get('id')}/hqdefault.jpg"
                         )
-        except Exception as e:
-            logger.error(f"Error in search from API: {e}")
+                        return Track(
+                            id=data.get("id"),
+                            channel_name=data.get("channel", {}).get("name"),
+                            duration=data.get("duration"),
+                            duration_sec=utils.to_seconds(data.get("duration")),
+                            message_id=m_id,
+                            title=(data.get("title") or "Track")[:25],
+                            thumbnail=thumb,
+                            url=data.get("link"),
+                            view_count=data.get("viewCount", {}).get("short"),
+                            video=video,
+                        )
+            return None
 
-        # Fallback to py_yt VideosSearch
+        async def _from_innertube() -> Track | None:
+            matches = await self._innertube_search(query, limit=1)
+            if matches:
+                item = matches[0]
+                return Track(
+                    id=item.get("id"),
+                    channel_name=item.get("channel"),
+                    duration=item.get("duration"),
+                    duration_sec=item.get("duration_sec"),
+                    message_id=m_id,
+                    title=(item.get("title") or "Track")[:25],
+                    thumbnail=item.get("thumbnail"),
+                    url=item.get("url"),
+                    view_count="",
+                    video=video,
+                )
+            return None
+
+        tasks = [
+            asyncio.create_task(_from_api()),
+            asyncio.create_task(_from_innertube()),
+        ]
+        try:
+            for done in asyncio.as_completed(tasks, timeout=4.0):
+                try:
+                    trk = await done
+                    if trk and trk.id:
+                        for t in tasks:
+                            if not t.done():
+                                t.cancel()
+                        return _store_and_return(trk)
+                except Exception:
+                    continue
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+
         try:
             _search = VideosSearch(query, limit=1, with_live=False)
-            results = await asyncio.wait_for(_search.next(), timeout=5)
+            results = await asyncio.wait_for(_search.next(), timeout=3.5)
             if results and results["result"]:
                 data = results["result"][0]
                 return _store_and_return(
@@ -571,7 +592,7 @@ class YouTube:
                         duration=data.get("duration"),
                         duration_sec=utils.to_seconds(data.get("duration")),
                         message_id=m_id,
-                        title=data.get("title")[:25],
+                        title=(data.get("title") or "Track")[:25],
                         thumbnail=data.get("thumbnails", [{}])[-1]
                         .get("url")
                         .split("?")[0],
@@ -583,7 +604,6 @@ class YouTube:
         except Exception:
             pass
 
-        # Last-resort local yt-dlp search fallback
         try:
             res_local = await asyncio.to_thread(_safe_search_ytdlp, query)
             if res_local and res_local.get("result"):
@@ -595,7 +615,7 @@ class YouTube:
                         duration=data.get("duration"),
                         duration_sec=utils.to_seconds(data.get("duration")),
                         message_id=m_id,
-                        title=data.get("title")[:25],
+                        title=(data.get("title") or "Track")[:25],
                         thumbnail=data.get("thumbnails", [{}])[-1]
                         .get("url")
                         .split("?")[0],
