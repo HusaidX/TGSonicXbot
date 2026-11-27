@@ -1,12 +1,5 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
 # All rights reserved.
-#
+
 
 import asyncio
 
@@ -51,10 +44,13 @@ def checkUB(play):
 
         play_mode = await db.get_play_mode(chat_id)
         if play_mode or force:
-            adminlist = await db.get_admins(chat_id)
+            adminlist, is_auth = await asyncio.gather(
+                db.get_admins(chat_id),
+                db.is_auth(chat_id, m.from_user.id),
+            )
             if (
                 m.from_user.id not in adminlist
-                and not await db.is_auth(chat_id, m.from_user.id)
+                and not is_auth
                 and m.from_user.id not in app.sudoers
             ):
                 return await m.reply_text(m.lang["play_admin"])
@@ -103,13 +99,13 @@ def checkUB(play):
                         )
 
                 umm = await m.reply_text(m.lang["play_invite"].format(app.name))
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
                 try:
                     await client.join_chat(invite_link)
                 except errors.UserAlreadyParticipant:
                     pass
                 except errors.InviteRequestSent:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(0.5)
                     try:
                         await app.approve_chat_join_request(chat_id, client.id)
                     except errors.HideRequesterMissing:
