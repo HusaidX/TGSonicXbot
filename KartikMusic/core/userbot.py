@@ -1,12 +1,5 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
 # All rights reserved.
-#
+
 
 from pyrogram import Client
 
@@ -58,13 +51,13 @@ class Userbot(Client):
         except Exception:
             raise SystemExit(f"Assistant {num} failed to send message in log group.")
 
-        client.id = ub.me.id
-        client.name = ub.me.first_name
-        client.username = ub.me.username
-        client.mention = ub.me.mention
+        client.id = client.me.id
+        client.name = client.me.first_name
+        client.username = client.me.username
+        client.mention = client.me.mention
         self.clients.append(client)
         try:
-            await ub.join_chat("fallenx")
+            await client.join_chat("fallenx")
         except Exception:
             pass
         logger.info(f"Assistant {num} started as @{client.username}")
