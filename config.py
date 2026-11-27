@@ -1,12 +1,5 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
 # All rights reserved.
-#
+
 
 from os import getenv
 
@@ -35,8 +28,8 @@ class Config:
         self.SESSION2 = getenv("SESSION2", None)
         self.SESSION3 = getenv("SESSION3", None)
 
-        self.SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/meowqti")
-        self.SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/Thealoneteam")
+        self.SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/SonicX_Robot")
+        self.SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/SonicXSupport")
 
         self.AUTO_LEAVE: bool = getenv("AUTO_LEAVE", "False").lower() == "true"
         self.AUTO_END: bool = getenv("AUTO_END", "False").lower() == "true"
@@ -49,13 +42,13 @@ class Config:
         self.COOKIES_URL = [
             url
             for url in getenv("COOKIES_URL", "").split(" ")
-            if url and "batbin.me" in url
+            if url
         ]
         self.DEFAULT_THUMB = getenv(
             "DEFAULT_THUMB", "https://te.legra.ph/file/3e40a408286d4eda24191.jpg"
         )
-        self.PING_IMG = getenv("PING_IMG", "https://files.catbox.moe/haagg2.png")
-        self.START_IMG = getenv("START_IMG", "https://files.catbox.moe/zvziwk.jpg")
+        self.PING_IMG = getenv("PING_IMG", "https://files.catbox.moe/po5tim.jpg")
+        self.START_IMG = getenv("START_IMG", "https://files.catbox.moe/np0eaw.png")
 
     def check(self):
         missing = [
