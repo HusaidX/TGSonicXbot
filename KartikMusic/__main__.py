@@ -1,17 +1,12 @@
-#
-# Copyright (C) 2025-present by TheAloneTeam@Github, < https://github.com/TheAloneTeam >.
-#
-# This file is part of < https://github.com/TheAloneTeam/KartikMusic > project,
-# and is released under the "MIT License".
-# Please see < https://github.com/TheAloneTeam/KartikMusic/blob/master/LICENSE >
-#
 # All rights reserved.
-#
 
 import asyncio
 import importlib
+import os
 import signal
 from contextlib import suppress
+
+from aiohttp import web
 
 from KartikMusic import Kartik, app, config, db, logger, stop, thumb, userbot, yt
 from KartikMusic.plugins import all_modules
@@ -27,7 +22,25 @@ async def idle():
     await stop_event.wait()
 
 
+async def start_web_server():
+    port = int(os.environ.get("PORT", 8080))
+
+    async def health_check(request):
+        return web.Response(text="OK", status=200)
+
+    web_app = web.Application()
+    web_app.router.add_get("/", health_check)
+    web_app.router.add_get("/health", health_check)
+
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Web server started on port {port}.")
+
+
 async def main():
+    await start_web_server()
     await db.connect()
     await thumb.start()
     await app.boot()
